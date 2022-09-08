@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 
+	"github.com/samarthya/cmd-client/cmd"
 	"github.com/spf13/cobra"
 )
 
@@ -39,6 +40,7 @@ func init() {
 	// Do not want to sort
 	cobra.EnableCommandSorting = false
 	rootCmd.Flags().StringVarP(&message, MessageFlag, "m", "Hello World!", "Message that will be displayed")
+	rootCmd.AddCommand(cmd.Vault)
 }
 
 func main() {
