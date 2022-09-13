@@ -1,0 +1,34 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Launch",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/src/main.go",
+            "args": [
+                "vault",
+                "-V",
+                "http://localhost:8200",
+                "-K",
+                "hvs.v9gOEUYNjExfrnXwjiUE41N5",
+                "-M",
+                "pki_int_1",
+                "-R",
+                "vaultbook",
+                "-C",
+                "centos12.brokers.test",
+                "-T",
+                "24",
+                "-L",
+                ".",
+                "-S",
+                "centos12.brokers.test",
+            ]
+        }
+    ]
+}
