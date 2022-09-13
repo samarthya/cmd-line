@@ -13,7 +13,7 @@
             "args": [
                 "vault",
                 "-V",
-                "http://localhost:8200",
+                "https://localhost:8200",
                 "-K",
                 "hvs.v9gOEUYNjExfrnXwjiUE41N5",
                 "-M",

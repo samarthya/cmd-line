@@ -2,10 +2,17 @@
 package cmd
 
 import (
+	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/md5"
 	"crypto/rand"
+	"crypto/sha1"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"time"
@@ -156,19 +163,72 @@ var (
 	}
 )
 
+// check does error checking
+func check(e error) {
+	if e != nil {
+		log.Printf("error: %v", e)
+	}
+}
+
+// passphraseToHash returns a hexadecimal string of an SHA1 checksumed passphrase
+func passphraseToHash(pass string) (string, []byte) {
+	// The salt is used as a unique string to defeat rainbow table attacks
+	saltHash := md5.New()
+	saltHash.Write([]byte(pass))
+	saltyBytes := saltHash.Sum(nil)
+	salt := hex.EncodeToString(saltyBytes)
+
+	saltyPass := []byte(pass + salt)
+	hasher := sha1.New()
+	hasher.Write(saltyPass)
+
+	hash := hasher.Sum(nil)
+
+	return hex.EncodeToString(hash), hash
+}
+
+// encryptBytes is a function that takes a plain byte slice and a passphrase and returns an encrypted byte slice
+func encryptBytes(bytesIn []byte, passphrase string) []byte {
+	passHash, _ := passphraseToHash(passphrase)
+	targetPassHash := passHash[0:32]
+
+	// Create an AES Cipher
+	block, err := aes.NewCipher([]byte(targetPassHash))
+	check(err)
+
+	// Create a new gcm block container
+	gcm, err := cipher.NewGCM(block)
+	check(err)
+
+	// Never use more than 2^32 random nonces with a given key because of the risk of repeat.
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		log.Fatal(err)
+	}
+
+	// Seal will encrypt the file using the GCM mode, appending the nonce and tag (MAC value) to the final data, so we can use it to decrypt it later.
+	return gcm.Seal(nonce, nonce, bytesIn, nil)
+}
+
 // TranslatePrivateKey as PKCS8 private key
 func TranslatePrivateKey(privateKey PrivateKey) ([]byte, error) {
 	log.Println(" Converting to a private key representation")
 	var privateKeyBytes = []byte(fmt.Sprint(privateKey))
 
-	log.Println(" Decode the PEM block")
+	log.Println(" Get the PEM block from bytes")
 	decodedString, _ := pem.Decode(privateKeyBytes)
 
 	log.Println(" Parsing the RSA private key")
-
 	ePK, err := x509.ParsePKCS1PrivateKey(decodedString.Bytes)
 	if err != nil {
 		log.Fatalf("Error while parsing the private key: %v", err.Error())
+	}
+	privateEncodedKey := new(bytes.Buffer)
+
+	if pem.Encode(privateEncodedKey, decodedString) == nil {
+		log.Println(" Encoding succeeded")
+		encBytes := encryptBytes(privateEncodedKey.Bytes(), password)
+		return encBytes, nil
 	}
 
 	x509Key, err := x509.MarshalPKCS8PrivateKey(ePK)
