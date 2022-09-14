@@ -7,6 +7,7 @@ require (
 	github.com/pavlo-v-chernykh/keystore-go/v4 v4.4.0
 	github.com/spf13/cobra v1.5.0
 	github.com/youmark/pkcs8 v0.0.0-20201027041543-1326539a0a0a
+	software.sslmate.com/src/go-pkcs12 v0.2.0
 )
 
 require (
@@ -48,7 +49,7 @@ require (
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/stretchr/testify v1.7.2 // indirect
 	go.uber.org/atomic v1.9.0 // indirect
-	golang.org/x/crypto v0.0.0-20210921155107-089bfa567519 // indirect
+	golang.org/x/crypto v0.0.0-20220331220935-ae2d96664a29 // indirect
 	golang.org/x/net v0.0.0-20220607020251-c690dde0001d // indirect
 	golang.org/x/sys v0.0.0-20220520151302-bc2c85ada10a // indirect
 	golang.org/x/text v0.3.7 // indirect
