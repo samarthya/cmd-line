@@ -10,7 +10,7 @@ import (
 	"time"
 
 	vault "github.com/hashicorp/vault/api"
-	"github.com/pavlo-v-chernykh/keystore-go/v4"
+	"github.com/pavel-v-chernykh/keystore-go/v3"
 	"github.com/spf13/cobra"
 	"github.com/youmark/pkcs8"
 )
@@ -148,32 +148,58 @@ var (
 				log.Printf(" Is CA: %t\n DNS Names: %s\n Issue: %s", brokerCert.IsCA, brokerCert.DNSNames, brokerCert.Issuer)
 
 				// New keystore
-				var keySS = keystore.New()
-
-				keySS.SetTrustedCertificateEntry("caroot", keystore.TrustedCertificateEntry{
-					CreationTime: time.Now(),
-					Certificate: keystore.Certificate{
-						Type:    "X509",
-						Content: rootCACert.Raw,
-					},
-				})
-
-				if err := keySS.SetPrivateKeyEntry(commonName, keystore.PrivateKeyEntry{
-					CreationTime: time.Now(),
-					PrivateKey:   decodedString.Bytes,
-					CertificateChain: []keystore.Certificate{
-						{
-							Type:    "X509",
-							Content: brokerCert.Raw,
+				var keySS = keystore.KeyStore{
+					"caroot": keystore.TrustedCertificateEntry{
+						Entry: keystore.Entry{
+							CreationTime: time.Now(),
 						},
-						{
+						Certificate: keystore.Certificate{
 							Type:    "X509",
 							Content: rootCACert.Raw,
 						},
 					},
-				}, []byte(password)); err != nil {
-					log.Fatal(err) // nolint: gocritic
+					commonName: keystore.PrivateKeyEntry{
+						Entry: keystore.Entry{
+							CreationTime: time.Now(),
+						},
+						PrivateKey: decodedString.Bytes,
+						CertificateChain: []keystore.Certificate{
+							{
+								Type:    "X509",
+								Content: brokerCert.Raw,
+							},
+							{
+								Type:    "X509",
+								Content: rootCACert.Raw,
+							},
+						},
+					},
 				}
+
+				// keySS.SetTrustedCertificateEntry("caroot", keystore.TrustedCertificateEntry{
+				// 	CreationTime: time.Now(),
+				// 	Certificate: keystore.Certificate{
+				// 		Type:    "X509",
+				// 		Content: rootCACert.Raw,
+				// 	},
+				// })
+
+				// if err := keySS.SetPrivateKeyEntry(commonName, keystore.PrivateKeyEntry{
+				// 	CreationTime: time.Now(),
+				// 	PrivateKey:   decodedString.Bytes,
+				// 	CertificateChain: []keystore.Certificate{
+				// 		{
+				// 			Type:    "X509",
+				// 			Content: brokerCert.Raw,
+				// 		},
+				// 		{
+				// 			Type:    "X509",
+				// 			Content: rootCACert.Raw,
+				// 		},
+				// 	},
+				// }, []byte(password)); err != nil {
+				// 	log.Fatal(err) // nolint: gocritic
+				// }
 
 				writeKeyStore(keySS, fmt.Sprintf("%s/netops-kafka.keystore.jks", keystoreLocation), []byte(password))
 				log.Println("Wrote the keystore at: ", fmt.Sprintf("%s/netops-kafka.keystore.jks", keystoreLocation))
@@ -223,7 +249,7 @@ func writeKeyStore(ks keystore.KeyStore, filename string, password []byte) {
 		}
 	}()
 
-	err = ks.Store(f, password)
+	err = keystore.Encode(f, ks, password)
 	if err != nil {
 		log.Fatal(err) // nolint: gocritic
 	}

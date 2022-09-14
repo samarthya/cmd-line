@@ -4,10 +4,9 @@ go 1.19
 
 require (
 	github.com/hashicorp/vault/api v1.7.2
-	github.com/pavlo-v-chernykh/keystore-go/v4 v4.4.0
+	github.com/pavel-v-chernykh/keystore-go/v3 v3.1.0
 	github.com/spf13/cobra v1.5.0
 	github.com/youmark/pkcs8 v0.0.0-20201027041543-1326539a0a0a
-	software.sslmate.com/src/go-pkcs12 v0.2.0
 )
 
 require (
