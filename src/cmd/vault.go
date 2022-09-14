@@ -13,6 +13,7 @@ import (
 	"github.com/pavlo-v-chernykh/keystore-go/v4"
 	"github.com/spf13/cobra"
 	"github.com/youmark/pkcs8"
+	"software.sslmate.com/src/go-pkcs12" 
 )
 
 // PrivateKey represent the keystore information
@@ -117,10 +118,43 @@ var (
 			log.Printf(" \nSerialNumber: %s\n", serialNumber)
 
 			if !dryRun {
-				var privateKeyBytes = []byte(fmt.Sprint(privateKey))
-
+				var encodedPrivateKey = []byte(fmt.Sprint(privateKey))
+				var certsIssued []keystore.Certificate = make([]keystore.Certificate, 0)
+				var privateKeyBytes []byte
 				log.Println(" Get the PEM block from bytes")
-				decodedString, _ := pem.Decode(privateKeyBytes)
+
+				for block, rest := pem.Decode(encodedPrivateKey); block != nil; block, rest = pem.Decode(rest) {
+					switch block.Type {
+					case "CERTIFICATE":
+
+						certsIssued = append(certsIssued, keystore.Certificate{
+							Type:    "X509",
+							Content: block.Bytes,
+						})
+
+						cert, err := x509.ParseCertificate(block.Bytes)
+						if err != nil {
+							panic(err)
+						}
+
+						// Handle certificate
+						fmt.Printf("%T %#v\n", cert, cert)
+
+					case "RSA PRIVATE KEY":
+						privateKeyBytes = make([]byte, len(block.Bytes))
+						copy(privateKeyBytes, block.Bytes)
+						key, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+						if err != nil {
+							panic(err)
+						}
+
+						// Handle private key
+						fmt.Printf("%T %#v\n", key, key)
+
+					default:
+						panic("unknown block type")
+					}
+				}
 
 				// x509Key, err := TranslatePrivateKey(privateKey)
 				// if err != nil {
@@ -131,22 +165,12 @@ var (
 				var rootCABytes []byte = []byte(fmt.Sprint(issuingCACertString))
 				rootCADecoded, _ := pem.Decode(rootCABytes)
 
-				var certIssuedBytes []byte = []byte(fmt.Sprint(cert))
-				certIssuedDecoded, _ := pem.Decode(certIssuedBytes)
-
 				rootCACert, err := x509.ParseCertificate(rootCADecoded.Bytes)
 				if err != nil {
 					log.Fatalf("Error while parsing CA cert: %v", err.Error())
 				}
 
-				brokerCert, err := x509.ParseCertificate(certIssuedDecoded.Bytes)
-
-				if err != nil {
-					log.Fatalf("Error while parsing root cert: %v", err.Error())
-				}
-
 				log.Printf(" Is CA: %t\n DNS Names: %s\n Issue: %s", rootCACert.IsCA, rootCACert.DNSNames, rootCACert.Issuer)
-				log.Printf(" Is CA: %t\n DNS Names: %s\n Issue: %s", brokerCert.IsCA, brokerCert.DNSNames, brokerCert.Issuer)
 
 				// New keystore
 				var keySS = keystore.New()
@@ -160,20 +184,19 @@ var (
 				})
 
 				if err := keySS.SetPrivateKeyEntry(commonName, keystore.PrivateKeyEntry{
-					CreationTime: time.Now(),
-					PrivateKey:   decodedString.Bytes,
-					CertificateChain: []keystore.Certificate{
-						{
-							Type:    "X509",
-							Content: rootCACert.Raw,
-						},
-						{
-							Type:    "X509",
-							Content: brokerCert.Raw,
-						},
-					},
-				}, []byte(password)); err != nil {
+					CreationTime:     time.Now(),
+					PrivateKey:       privateKeyBytes,
+					CertificateChain: certsIssued,
+				}, []byte("changeit")); err != nil {
 					log.Fatal(err) // nolint: gocritic
+				}
+
+				log.Println(" Private Key entry added", keySS.IsPrivateKeyEntry(commonName))
+
+				test, err := keySS.GetPrivateKeyEntry(commonName, []byte(password))
+
+				if err == nil {
+					log.Println(test.CreationTime)
 				}
 
 				writeKeyStore(keySS, fmt.Sprintf("%s/netops-kafka.keystore.jks", keystoreLocation), []byte(password))
