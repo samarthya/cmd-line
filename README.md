@@ -150,3 +150,9 @@ cmd-line % go run src/main.go helo --message Wow!
 2022/09/08 09:57:21  Flags: Wow!
 >> Wow!<<
 ```
+
+## Building the binary
+
+```bash
+env GOOS=linux GOARCH=arm64 go build  -o ../target/vault-agent main.go
+```

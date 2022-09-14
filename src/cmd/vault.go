@@ -2,24 +2,17 @@
 package cmd
 
 import (
-	"bytes"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/md5"
-	"crypto/rand"
-	"crypto/sha1"
 	"crypto/x509"
-	"encoding/hex"
 	"encoding/pem"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"time"
 
 	vault "github.com/hashicorp/vault/api"
-	"github.com/pavel-v-chernykh/keystore-go/v3"
+	"github.com/pavlo-v-chernykh/keystore-go/v4"
 	"github.com/spf13/cobra"
+	"github.com/youmark/pkcs8"
 )
 
 // PrivateKey represent the keystore information
@@ -95,9 +88,10 @@ var (
 			client.SetToken(token)
 			secret, err := client.Logical().Write(fmt.Sprintf("%s/issue/%s", mountPath, roleName), map[string]interface{}{
 				"common_name": commonName,
-				"ttl":         ttlHours,
+				"ttl":         "1024",
 				"ip_sans":     ipSan,
 				"alt_names":   dnsSan,
+				"format":      "pem_bundle",
 			})
 
 			if err != nil {
@@ -109,106 +103,85 @@ var (
 
 			issuingCACertString := secret.Data["issuing_ca"]
 			caChain := secret.Data["ca_chain"]
+			cert := secret.Data["certificate"]
 			privateKey := secret.Data["private_key"]
 			serialNumber := secret.Data["serial_number"]
 
 			log.Println(" Secret: ", secret)
-			log.Printf(" Expiring: %d\n", secret.LeaseDuration)
-			log.Printf(" Issuing CA: %s\n", issuingCACertString)
-			log.Printf(" CA Chain: %s\n", caChain)
-			log.Printf(" Private Key: %s\n", privateKey)
-			log.Printf(" Private Key Type: %s\n", keyType)
-			log.Printf(" SerialNumber: %s\n", serialNumber)
+			log.Printf(" \nCert: %v\n", cert)
+			log.Printf(" \nExpiring: %d\n", secret.LeaseDuration)
+			log.Printf(" \nIssuing CA: %s\n", issuingCACertString)
+			log.Printf(" \nCA Chain: %s\n", caChain)
+			log.Printf(" \nPrivate Key: %s\n", privateKey)
+			log.Printf(" \nPrivate Key Type: %s\n", keyType)
+			log.Printf(" \nSerialNumber: %s\n", serialNumber)
 
 			if !dryRun {
-				x509Key, err := TranslatePrivateKey(privateKey)
-				if err != nil {
-					log.Fatalf("Error while creating PKCS8 key: %v", err.Error())
-				}
+				var privateKeyBytes = []byte(fmt.Sprint(privateKey))
 
-				var pCA []byte = []byte(fmt.Sprint(issuingCACertString))
-				dCA, _ := pem.Decode(pCA)
-				xCA, err := x509.ParseCertificate(dCA.Bytes)
+				log.Println(" Get the PEM block from bytes")
+				decodedString, _ := pem.Decode(privateKeyBytes)
 
+				// x509Key, err := TranslatePrivateKey(privateKey)
+				// if err != nil {
+				// 	log.Fatalf("Error while creating PKCS8 key: %v", err.Error())
+				// }
+				// log.Printf("%v\n", x509Key)
+
+				var rootCABytes []byte = []byte(fmt.Sprint(issuingCACertString))
+				rootCADecoded, _ := pem.Decode(rootCABytes)
+
+				var certIssuedBytes []byte = []byte(fmt.Sprint(cert))
+				certIssuedDecoded, _ := pem.Decode(certIssuedBytes)
+
+				rootCACert, err := x509.ParseCertificate(rootCADecoded.Bytes)
 				if err != nil {
 					log.Fatalf("Error while parsing CA cert: %v", err.Error())
 				}
 
-				log.Printf(" Is CA: %t\n DNS Names: %s\n Issue: %s", xCA.IsCA, xCA.DNSNames, xCA.Issuer)
+				brokerCert, err := x509.ParseCertificate(certIssuedDecoded.Bytes)
 
-				// dCAChain, _ := pem.Decode([]byte(fmt.Sprint(caChain)))
-				keyStoreSafe := keystore.KeyStore{
-					commonName: &keystore.PrivateKeyEntry{
-						Entry: keystore.Entry{
-							CreationTime: time.Now(),
-						},
-						PrivateKey: x509Key,
-					},
-					"caroot": &keystore.TrustedCertificateEntry{
-						Entry: keystore.Entry{
-							CreationTime: time.Now(),
-						},
-						Certificate: keystore.Certificate{
-							Type:    "X509",
-							Content: xCA.Raw,
-						},
-					},
+				if err != nil {
+					log.Fatalf("Error while parsing root cert: %v", err.Error())
 				}
 
-				defer zeroing([]byte(password))
-				writeKeyStore(keyStoreSafe, fmt.Sprintf("%s/netops-kafka.keystore.jks", keystoreLocation), []byte(password))
+				log.Printf(" Is CA: %t\n DNS Names: %s\n Issue: %s", rootCACert.IsCA, rootCACert.DNSNames, rootCACert.Issuer)
+				log.Printf(" Is CA: %t\n DNS Names: %s\n Issue: %s", brokerCert.IsCA, brokerCert.DNSNames, brokerCert.Issuer)
+
+				// New keystore
+				var keySS = keystore.New()
+
+				keySS.SetTrustedCertificateEntry("caroot", keystore.TrustedCertificateEntry{
+					CreationTime: time.Now(),
+					Certificate: keystore.Certificate{
+						Type:    "X509",
+						Content: rootCACert.Raw,
+					},
+				})
+
+				if err := keySS.SetPrivateKeyEntry(commonName, keystore.PrivateKeyEntry{
+					CreationTime: time.Now(),
+					PrivateKey:   decodedString.Bytes,
+					CertificateChain: []keystore.Certificate{
+						{
+							Type:    "X509",
+							Content: rootCACert.Raw,
+						},
+						{
+							Type:    "X509",
+							Content: brokerCert.Raw,
+						},
+					},
+				}, []byte(password)); err != nil {
+					log.Fatal(err) // nolint: gocritic
+				}
+
+				writeKeyStore(keySS, fmt.Sprintf("%s/netops-kafka.keystore.jks", keystoreLocation), []byte(password))
 				log.Println("Wrote the keystore at: ", fmt.Sprintf("%s/netops-kafka.keystore.jks", keystoreLocation))
 			}
 		},
 	}
 )
-
-// check does error checking
-func check(e error) {
-	if e != nil {
-		log.Printf("error: %v", e)
-	}
-}
-
-// passphraseToHash returns a hexadecimal string of an SHA1 checksumed passphrase
-func passphraseToHash(pass string) (string, []byte) {
-	// The salt is used as a unique string to defeat rainbow table attacks
-	saltHash := md5.New()
-	saltHash.Write([]byte(pass))
-	saltyBytes := saltHash.Sum(nil)
-	salt := hex.EncodeToString(saltyBytes)
-
-	saltyPass := []byte(pass + salt)
-	hasher := sha1.New()
-	hasher.Write(saltyPass)
-
-	hash := hasher.Sum(nil)
-
-	return hex.EncodeToString(hash), hash
-}
-
-// encryptBytes is a function that takes a plain byte slice and a passphrase and returns an encrypted byte slice
-func encryptBytes(bytesIn []byte, passphrase string) []byte {
-	passHash, _ := passphraseToHash(passphrase)
-	targetPassHash := passHash[0:32]
-
-	// Create an AES Cipher
-	block, err := aes.NewCipher([]byte(targetPassHash))
-	check(err)
-
-	// Create a new gcm block container
-	gcm, err := cipher.NewGCM(block)
-	check(err)
-
-	// Never use more than 2^32 random nonces with a given key because of the risk of repeat.
-	nonce := make([]byte, gcm.NonceSize())
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		log.Fatal(err)
-	}
-
-	// Seal will encrypt the file using the GCM mode, appending the nonce and tag (MAC value) to the final data, so we can use it to decrypt it later.
-	return gcm.Seal(nonce, nonce, bytesIn, nil)
-}
 
 // TranslatePrivateKey as PKCS8 private key
 func TranslatePrivateKey(privateKey PrivateKey) ([]byte, error) {
@@ -218,62 +191,42 @@ func TranslatePrivateKey(privateKey PrivateKey) ([]byte, error) {
 	log.Println(" Get the PEM block from bytes")
 	decodedString, _ := pem.Decode(privateKeyBytes)
 
+	xS, err := x509.ParseCertificate(decodedString.Bytes)
+	if err == nil {
+		log.Printf("%v\n", xS)
+	}
+
 	log.Println(" Parsing the RSA private key")
 	ePK, err := x509.ParsePKCS1PrivateKey(decodedString.Bytes)
 	if err != nil {
 		log.Fatalf("Error while parsing the private key: %v", err.Error())
 	}
-	privateEncodedKey := new(bytes.Buffer)
 
-	if pem.Encode(privateEncodedKey, decodedString) == nil {
-		log.Println(" Encoding succeeded")
-		encBytes := encryptBytes(privateEncodedKey.Bytes(), password)
-		return encBytes, nil
-	}
+	return pkcs8.MarshalPrivateKey(ePK, []byte(password), pkcs8.DefaultOpts)
 
-	x509Key, err := x509.MarshalPKCS8PrivateKey(ePK)
-	if err != nil {
-		log.Fatalf("Error while creating PKCS8 key: %v", err.Error())
-	}
+	// x509Key, err := x509.MarshalPKCS8PrivateKey(ePK)
+	// if err != nil {
+	// 	log.Fatalf("Error while creating PKCS8 key: %v", err.Error())
+	// }
 
-	return x509Key, nil
+	// return x509Key, nil
 }
 
-// TranslatePrivateKeyEncrypted Defines the password encrypted key
-func TranslatePrivateKeyEncrypted(privateKey PrivateKey) ([]byte, error) {
-	var ppk = []byte(fmt.Sprint(privateKey))
-	decodedString, _ := pem.Decode(ppk)
-
-	log.Println(" Parsing the RSA private key")
-	pemPrivate, err := x509.EncryptPEMBlock(rand.Reader, "RSA PRIVATE KEY", decodedString.Bytes, []byte(password), x509.PEMCipherAES128)
-	if err != nil {
-		log.Fatalf("Error while encrypting the private key: %v", err.Error())
-	}
-	return pemPrivate.Bytes, nil
-}
-
-func readKeyStore(filename string, password []byte) keystore.KeyStore {
-	f, err := os.Open(filename)
+func writeKeyStore(ks keystore.KeyStore, filename string, password []byte) {
+	f, err := os.Create(filename)
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer f.Close()
-	keyStore, err := keystore.Decode(f, password)
-	if err != nil {
-		log.Fatal(err)
-	}
-	return keyStore
-}
 
-func writeKeyStore(keyStore keystore.KeyStore, filename string, password []byte) {
-	o, err := os.Create(filename)
+	defer func() {
+		if err := f.Close(); err != nil {
+			log.Fatal(err)
+		}
+	}()
+
+	err = ks.Store(f, password)
 	if err != nil {
-		log.Fatal(err)
-	}
-	defer o.Close()
-	err = keystore.Encode(o, keyStore, password)
-	if err != nil {
-		log.Fatal(" Error writing keystore: ", err)
+		log.Fatal(err) // nolint: gocritic
 	}
 }
 
