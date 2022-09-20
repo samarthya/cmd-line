@@ -10,7 +10,7 @@ import (
 	"time"
 
 	vault "github.com/hashicorp/vault/api"
-	"github.com/pavel-v-chernykh/keystore-go/v3"
+	"github.com/pavlo-v-chernykh/keystore-go/v4"
 	"github.com/spf13/cobra"
 	"github.com/youmark/pkcs8"
 )
@@ -51,6 +51,9 @@ const (
 
 	//KeyStoreLocation identifies the loaction of the keystore
 	KeyStoreLocation = "keystore"
+
+	// Verbose identifies log level
+	Verbose = "verbose"
 )
 
 var (
@@ -65,6 +68,7 @@ var (
 	ttlHours         string
 	password         string
 	keystoreLocation string
+	verbose          bool
 
 	// VaultCmd command to interact with the vault
 	VaultCmd = &cobra.Command{
@@ -100,19 +104,27 @@ var (
 			//Extracting the data from the Data map
 			var keyType PrivateKey = secret.Data["private_key_type"]
 
+			// Issuing CA
 			issuingCACertString := secret.Data["issuing_ca"]
+			//CA Chain
 			caChain := secret.Data["ca_chain"]
+			//Certificate issued
 			cert := secret.Data["certificate"]
+			//Private Key
 			privateKey := secret.Data["private_key"]
+			//Serial number of the issued certificate
 			serialNumber := secret.Data["serial_number"]
 
-			log.Println(" Secret: ", secret)
-			log.Printf(" \nCert: %v\n", cert)
-			log.Printf(" \nExpiring: %d\n", secret.LeaseDuration)
-			log.Printf(" \nIssuing CA: %s\n", issuingCACertString)
-			log.Printf(" \nCA Chain: %s\n", caChain)
-			log.Printf(" \nPrivate Key: %s\n", privateKey)
-			log.Printf(" \nPrivate Key Type: %s\n", keyType)
+			if verbose {
+				log.Println(" Secret: ", secret)
+				log.Printf(" \nCert: %v\n", cert)
+				log.Printf(" \nExpiring: %d\n", secret.LeaseDuration)
+				log.Printf(" \nIssuing CA: %s\n", issuingCACertString)
+				log.Printf(" \nCA Chain: %s\n", caChain)
+				log.Printf(" \nPrivate Key: %s\n", privateKey)
+				log.Printf(" \nPrivate Key Type: %s\n", keyType)
+			}
+
 			log.Printf(" \nSerialNumber: %s\n", serialNumber)
 
 			if !dryRun {
@@ -147,59 +159,63 @@ var (
 				log.Printf(" Is CA: %t\n DNS Names: %s\n Issue: %s", rootCACert.IsCA, rootCACert.DNSNames, rootCACert.Issuer)
 				log.Printf(" Is CA: %t\n DNS Names: %s\n Issue: %s", brokerCert.IsCA, brokerCert.DNSNames, brokerCert.Issuer)
 
+				//v4 API
+				var keySS = keystore.New()
+
 				// New keystore
-				var keySS = keystore.KeyStore{
-					"caroot": keystore.TrustedCertificateEntry{
-						Entry: keystore.Entry{
-							CreationTime: time.Now(),
-						},
-						Certificate: keystore.Certificate{
-							Type:    "X509",
-							Content: rootCACert.Raw,
-						},
-					},
-					commonName: keystore.PrivateKeyEntry{
-						Entry: keystore.Entry{
-							CreationTime: time.Now(),
-						},
-						PrivateKey: decodedString.Bytes,
-						CertificateChain: []keystore.Certificate{
-							{
-								Type:    "X509",
-								Content: brokerCert.Raw,
-							},
-							{
-								Type:    "X509",
-								Content: rootCACert.Raw,
-							},
-						},
-					},
-				}
-
-				// keySS.SetTrustedCertificateEntry("caroot", keystore.TrustedCertificateEntry{
-				// 	CreationTime: time.Now(),
-				// 	Certificate: keystore.Certificate{
-				// 		Type:    "X509",
-				// 		Content: rootCACert.Raw,
-				// 	},
-				// })
-
-				// if err := keySS.SetPrivateKeyEntry(commonName, keystore.PrivateKeyEntry{
-				// 	CreationTime: time.Now(),
-				// 	PrivateKey:   decodedString.Bytes,
-				// 	CertificateChain: []keystore.Certificate{
-				// 		{
-				// 			Type:    "X509",
-				// 			Content: brokerCert.Raw,
+				// var keySS = keystore.KeyStore{
+				// 	"caroot": keystore.TrustedCertificateEntry{
+				// 		Entry: keystore.Entry{
+				// 			CreationTime: time.Now(),
 				// 		},
-				// 		{
+				// 		Certificate: keystore.Certificate{
 				// 			Type:    "X509",
 				// 			Content: rootCACert.Raw,
 				// 		},
 				// 	},
-				// }, []byte(password)); err != nil {
-				// 	log.Fatal(err) // nolint: gocritic
+				// 	commonName: keystore.PrivateKeyEntry{
+				// 		Entry: keystore.Entry{
+				// 			CreationTime: time.Now(),
+				// 		},
+				// 		PrivateKey: decodedString.Bytes,
+				// 		CertificateChain: []keystore.Certificate{
+				// 			{
+				// 				Type:    "X509",
+				// 				Content: brokerCert.Raw,
+				// 			},
+				// 			{
+				// 				Type:    "X509",
+				// 				Content: rootCACert.Raw,
+				// 			},
+				// 		},
+				// 	},
 				// }
+
+				//v4 API
+				keySS.SetTrustedCertificateEntry("caroot", keystore.TrustedCertificateEntry{
+					CreationTime: time.Now(),
+					Certificate: keystore.Certificate{
+						Type:    "X509",
+						Content: rootCACert.Raw,
+					},
+				})
+
+				if err := keySS.SetPrivateKeyEntry(commonName, keystore.PrivateKeyEntry{
+					CreationTime: time.Now(),
+					PrivateKey:   decodedString.Bytes,
+					CertificateChain: []keystore.Certificate{
+						{
+							Type:    "X509",
+							Content: brokerCert.Raw,
+						},
+						{
+							Type:    "X509",
+							Content: rootCACert.Raw,
+						},
+					},
+				}, []byte(password)); err != nil {
+					log.Fatal(err) // nolint: gocritic
+				}
 
 				writeKeyStore(keySS, fmt.Sprintf("%s/netops-kafka.keystore.jks", keystoreLocation), []byte(password))
 				log.Println("Wrote the keystore at: ", fmt.Sprintf("%s/netops-kafka.keystore.jks", keystoreLocation))
@@ -249,7 +265,7 @@ func writeKeyStore(ks keystore.KeyStore, filename string, password []byte) {
 		}
 	}()
 
-	err = keystore.Encode(f, ks, password)
+	err = ks.Store(f, password)
 	if err != nil {
 		log.Fatal(err) // nolint: gocritic
 	}
@@ -279,6 +295,7 @@ func init() {
 	VaultCmd.MarkFlagRequired(password)
 
 	VaultCmd.Flags().BoolP(DryRun, "D", false, "Dry run (Only generates certificate but does not replace it in the config.")
+	VaultCmd.Flags().Bool(Verbose, false, "If you wish to add to see more debug information.")
 	VaultCmd.Flags().StringVarP(&ttlHours, TTLHours, "T", "24", "The vault role name for issuing certificates")
 	VaultCmd.Flags().StringVarP(&ipSan, IPSan, "I", "", "Comma separated list of IP addresses to use in certificate SAN")
 	VaultCmd.Flags().StringVarP(&dnsSan, DNSSan, "S", "", "Comma separated list of DNS addresses to use in certificate SAN")
