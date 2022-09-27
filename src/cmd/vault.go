@@ -11,8 +11,8 @@ import (
 
 	vault "github.com/hashicorp/vault/api"
 	"github.com/pavlo-v-chernykh/keystore-go/v4"
+
 	"github.com/spf13/cobra"
-	"github.com/youmark/pkcs8"
 )
 
 // PrivateKey represent the keystore information
@@ -52,8 +52,8 @@ const (
 	//KeyStoreLocation identifies the loaction of the keystore
 	KeyStoreLocation = "keystore"
 
-	// Verbose identifies log level
-	Verbose = "verbose"
+	// Debug identifies log level
+	Debug = "debug"
 )
 
 var (
@@ -68,7 +68,7 @@ var (
 	ttlHours         string
 	password         string
 	keystoreLocation string
-	verbose          bool
+	debug            bool
 
 	// VaultCmd command to interact with the vault
 	VaultCmd = &cobra.Command{
@@ -115,7 +115,7 @@ var (
 			//Serial number of the issued certificate
 			serialNumber := secret.Data["serial_number"]
 
-			if verbose {
+			if debug == true {
 				log.Println(" Secret: ", secret)
 				log.Printf(" \nCert: %v\n", cert)
 				log.Printf(" \nExpiring: %d\n", secret.LeaseDuration)
@@ -132,12 +132,6 @@ var (
 
 				log.Println(" Get the PEM block from bytes")
 				decodedString, _ := pem.Decode(privateKeyBytes)
-
-				// x509Key, err := TranslatePrivateKey(privateKey)
-				// if err != nil {
-				// 	log.Fatalf("Error while creating PKCS8 key: %v", err.Error())
-				// }
-				// log.Printf("%v\n", x509Key)
 
 				var rootCABytes []byte = []byte(fmt.Sprint(issuingCACertString))
 				rootCADecoded, _ := pem.Decode(rootCABytes)
@@ -162,35 +156,6 @@ var (
 				//v4 API
 				var keySS = keystore.New()
 
-				// New keystore
-				// var keySS = keystore.KeyStore{
-				// 	"caroot": keystore.TrustedCertificateEntry{
-				// 		Entry: keystore.Entry{
-				// 			CreationTime: time.Now(),
-				// 		},
-				// 		Certificate: keystore.Certificate{
-				// 			Type:    "X509",
-				// 			Content: rootCACert.Raw,
-				// 		},
-				// 	},
-				// 	commonName: keystore.PrivateKeyEntry{
-				// 		Entry: keystore.Entry{
-				// 			CreationTime: time.Now(),
-				// 		},
-				// 		PrivateKey: decodedString.Bytes,
-				// 		CertificateChain: []keystore.Certificate{
-				// 			{
-				// 				Type:    "X509",
-				// 				Content: brokerCert.Raw,
-				// 			},
-				// 			{
-				// 				Type:    "X509",
-				// 				Content: rootCACert.Raw,
-				// 			},
-				// 		},
-				// 	},
-				// }
-
 				//v4 API
 				keySS.SetTrustedCertificateEntry("caroot", keystore.TrustedCertificateEntry{
 					CreationTime: time.Now(),
@@ -200,59 +165,75 @@ var (
 					},
 				})
 
-				if err := keySS.SetPrivateKeyEntry(commonName, keystore.PrivateKeyEntry{
+				//Keystore needs PKCS8encoded keys
+				keyPKCS1, err := x509.ParsePKCS1PrivateKey(decodedString.Bytes)
+				if err != nil {
+					log.Fatalf("Error while getting PKCS8Key: %v", err)
+				}
+
+				pkcs8key, err := x509.MarshalPKCS8PrivateKey(keyPKCS1)
+				if err != nil {
+					log.Fatalf("Error while getting PKCS8Key: %v", err)
+				}
+
+				pkEntry := keystore.PrivateKeyEntry{
 					CreationTime: time.Now(),
-					PrivateKey:   decodedString.Bytes,
+					PrivateKey:   pkcs8key,
 					CertificateChain: []keystore.Certificate{
 						{
 							Type:    "X509",
 							Content: brokerCert.Raw,
 						},
-						{
-							Type:    "X509",
-							Content: rootCACert.Raw,
-						},
 					},
-				}, []byte(password)); err != nil {
-					log.Fatal(err) // nolint: gocritic
+				}
+
+				if err := keySS.SetPrivateKeyEntry(commonName, pkEntry, []byte(password)); err != nil {
+					log.Fatal(err)
 				}
 
 				writeKeyStore(keySS, fmt.Sprintf("%s/netops-kafka.keystore.jks", keystoreLocation), []byte(password))
+
+				if debug {
+					eP, err := keySS.GetPrivateKeyEntry(commonName, []byte(password))
+					if err == nil {
+						log.Println(" Testing the keystore created entry succeeded")
+						key, err := x509.ParsePKCS8PrivateKey(eP.PrivateKey)
+						if err == nil {
+							log.Printf(" Key: %v\n", key)
+						}
+					} else {
+						log.Fatalf(" Failed testing of the private key")
+					}
+				}
+
 				log.Println("Wrote the keystore at: ", fmt.Sprintf("%s/netops-kafka.keystore.jks", keystoreLocation))
 			}
 		},
 	}
 )
 
-// TranslatePrivateKey as PKCS8 private key
-func TranslatePrivateKey(privateKey PrivateKey) ([]byte, error) {
-	log.Println(" Converting to a private key representation")
-	var privateKeyBytes = []byte(fmt.Sprint(privateKey))
-
-	log.Println(" Get the PEM block from bytes")
-	decodedString, _ := pem.Decode(privateKeyBytes)
-
-	xS, err := x509.ParseCertificate(decodedString.Bytes)
-	if err == nil {
-		log.Printf("%v\n", xS)
-	}
-
-	log.Println(" Parsing the RSA private key")
-	ePK, err := x509.ParsePKCS1PrivateKey(decodedString.Bytes)
+// readKeyStore is for reading
+func readKeyStore(filename string, password []byte) keystore.KeyStore {
+	f, err := os.Open(filename)
 	if err != nil {
-		log.Fatalf("Error while parsing the private key: %v", err.Error())
+		log.Fatal(err)
 	}
 
-	return pkcs8.MarshalPrivateKey(ePK, []byte(password), pkcs8.DefaultOpts)
+	defer func() {
+		if err := f.Close(); err != nil {
+			log.Fatal(err)
+		}
+	}()
 
-	// x509Key, err := x509.MarshalPKCS8PrivateKey(ePK)
-	// if err != nil {
-	// 	log.Fatalf("Error while creating PKCS8 key: %v", err.Error())
-	// }
+	ks := keystore.New()
+	if err := ks.Load(f, password); err != nil {
+		log.Fatal(err) // nolint: gocritic
+	}
 
-	// return x509Key, nil
+	return ks
 }
 
+// function writeKeyStore
 func writeKeyStore(ks keystore.KeyStore, filename string, password []byte) {
 	f, err := os.Create(filename)
 	if err != nil {
@@ -267,7 +248,7 @@ func writeKeyStore(ks keystore.KeyStore, filename string, password []byte) {
 
 	err = ks.Store(f, password)
 	if err != nil {
-		log.Fatal(err) // nolint: gocritic
+		log.Fatal(err)
 	}
 }
 
@@ -283,7 +264,6 @@ func init() {
 	VaultCmd.Flags().StringVarP(&vaultAddress, OptionVault, "V", "", "The vault address")
 	VaultCmd.MarkFlagRequired(OptionVault)
 	VaultCmd.Flags().StringVarP(&token, Token, "K", "", "The access token with certificate issue authorization")
-	VaultCmd.MarkFlagRequired(Token)
 	VaultCmd.Flags().StringVarP(&mountPath, MountPath, "M", "", "The certificate mount path on the vault server")
 	VaultCmd.MarkFlagRequired(MountPath)
 	VaultCmd.Flags().StringVarP(&roleName, RoleName, "R", "", "The vault role name for issuing certificates")
@@ -294,8 +274,9 @@ func init() {
 	VaultCmd.Flags().StringVarP(&password, Password, "P", "changeit", "Password for the keystore")
 	VaultCmd.MarkFlagRequired(password)
 
-	VaultCmd.Flags().BoolP(DryRun, "D", false, "Dry run (Only generates certificate but does not replace it in the config.")
-	VaultCmd.Flags().Bool(Verbose, false, "If you wish to add to see more debug information.")
+	VaultCmd.Flags().BoolVarP(&debug, Debug, "v", false, "If you wish to add to see more debug information.")
+	VaultCmd.Flags().BoolVarP(&dryRun, DryRun, "D", false, "Dry run (Only generates certificate but does not replace it in the config.")
+
 	VaultCmd.Flags().StringVarP(&ttlHours, TTLHours, "T", "24", "The vault role name for issuing certificates")
 	VaultCmd.Flags().StringVarP(&ipSan, IPSan, "I", "", "Comma separated list of IP addresses to use in certificate SAN")
 	VaultCmd.Flags().StringVarP(&dnsSan, DNSSan, "S", "", "Comma separated list of DNS addresses to use in certificate SAN")

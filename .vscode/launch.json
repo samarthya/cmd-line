@@ -28,6 +28,7 @@
                 ".",
                 "-S",
                 "centos12.brokers.test",
+                "--debug=true",
             ]
         }
     ]
