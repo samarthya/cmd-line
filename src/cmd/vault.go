@@ -54,6 +54,9 @@ const (
 
 	// Debug identifies log level
 	Debug = "debug"
+
+	//Name of the store
+	Name = "name"
 )
 
 var (
@@ -69,6 +72,7 @@ var (
 	password         string
 	keystoreLocation string
 	debug            bool
+	name             string
 
 	// VaultCmd command to interact with the vault
 	VaultCmd = &cobra.Command{
@@ -157,7 +161,7 @@ var (
 				var keySS = keystore.New()
 
 				//v4 API
-				keySS.SetTrustedCertificateEntry("caroot", keystore.TrustedCertificateEntry{
+				keySS.SetTrustedCertificateEntry("intermediate ca", keystore.TrustedCertificateEntry{
 					CreationTime: time.Now(),
 					Certificate: keystore.Certificate{
 						Type:    "X509",
@@ -184,6 +188,10 @@ var (
 							Type:    "X509",
 							Content: brokerCert.Raw,
 						},
+						{
+							Type:    "X509",
+							Content: rootCACert.Raw,
+						},
 					},
 				}
 
@@ -206,7 +214,7 @@ var (
 					}
 				}
 
-				log.Println("Wrote the keystore at: ", fmt.Sprintf("%s/netops-kafka.keystore.jks", keystoreLocation))
+				log.Println("Wrote the keystore at: ", fmt.Sprintf("%s/%s", keystoreLocation, name))
 			}
 		},
 	}
@@ -281,5 +289,5 @@ func init() {
 	VaultCmd.Flags().StringVarP(&ipSan, IPSan, "I", "", "Comma separated list of IP addresses to use in certificate SAN")
 	VaultCmd.Flags().StringVarP(&dnsSan, DNSSan, "S", "", "Comma separated list of DNS addresses to use in certificate SAN")
 	VaultCmd.Flags().StringVarP(&keystoreLocation, KeyStoreLocation, "L", "./", "The path to the keystore location")
-
+	VaultCmd.Flags().StringVarP(&name, Name, "n", "kafka.netops.keystore.jks", "Optonal name of the kesytore")
 }

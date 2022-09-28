@@ -21,13 +21,13 @@
                 "-R",
                 "vaultbook",
                 "-C",
-                "centos12.brokers.test",
+                "centos1.brokers.test",
                 "-T",
                 "24",
                 "-L",
                 ".",
                 "-S",
-                "centos12.brokers.test",
+                "centos1.brokers.test",
                 "--debug=true",
             ]
         }
