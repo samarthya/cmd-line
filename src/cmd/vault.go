@@ -96,7 +96,7 @@ var (
 			client.SetToken(token)
 			secret, err := client.Logical().Write(fmt.Sprintf("%s/issue/%s", mountPath, roleName), map[string]interface{}{
 				"common_name": commonName,
-				"ttl":         "1024",
+				"ttl":         ttlHours,
 				"ip_sans":     ipSan,
 				"alt_names":   dnsSan,
 			})
@@ -154,8 +154,8 @@ var (
 					log.Fatalf("Error while parsing root cert: %v", err.Error())
 				}
 
-				log.Printf(" Is CA: %t\n DNS Names: %s\n Issue: %s", rootCACert.IsCA, rootCACert.DNSNames, rootCACert.Issuer)
-				log.Printf(" Is CA: %t\n DNS Names: %s\n Issue: %s", brokerCert.IsCA, brokerCert.DNSNames, brokerCert.Issuer)
+				log.Printf(" Is CA: %t\n DNS Names: %s\n Issue: %s\n Not After: %v", rootCACert.IsCA, rootCACert.DNSNames, rootCACert.Issuer, rootCACert.NotAfter)
+				log.Printf(" Is CA: %t\n DNS Names: %s\n Issue: %s\n Not Before: %v\n Not After: %v", brokerCert.IsCA, brokerCert.DNSNames, brokerCert.Issuer, brokerCert.NotBefore, brokerCert.NotAfter)
 
 				//v4 API
 				var keySS = keystore.New()
@@ -199,7 +199,7 @@ var (
 					log.Fatal(err)
 				}
 
-				writeKeyStore(keySS, fmt.Sprintf("%s/netops-kafka.keystore.jks", keystoreLocation), []byte(password))
+				writeKeyStore(keySS, fmt.Sprintf("%s/%s", keystoreLocation, name), []byte(password))
 
 				if debug {
 					eP, err := keySS.GetPrivateKeyEntry(commonName, []byte(password))
@@ -289,5 +289,5 @@ func init() {
 	VaultCmd.Flags().StringVarP(&ipSan, IPSan, "I", "", "Comma separated list of IP addresses to use in certificate SAN")
 	VaultCmd.Flags().StringVarP(&dnsSan, DNSSan, "S", "", "Comma separated list of DNS addresses to use in certificate SAN")
 	VaultCmd.Flags().StringVarP(&keystoreLocation, KeyStoreLocation, "L", "./", "The path to the keystore location")
-	VaultCmd.Flags().StringVarP(&name, Name, "n", "kafka.netops.keystore.jks", "Optonal name of the kesytore")
+	VaultCmd.Flags().StringVarP(&name, Name, "n", "kafka.netops.keystore.jks", "Optional name of the kesytore")
 }
